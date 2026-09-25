@@ -49,6 +49,7 @@ export const CopilotManager = {
     window.addEventListener("beforeunload", (e) => {
       if (this._working) {
         e.preventDefault();
+        e.returnValue = "";
         return "";
       }
     });

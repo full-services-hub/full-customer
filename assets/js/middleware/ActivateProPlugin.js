@@ -4,6 +4,26 @@ import { generateId } from "../utils/functions.js";
 
 export const ActivateProPlugin = {
   _working: false,
+  _beforeUnloadHandler: null,
+
+  _enableBeforeUnload() {
+    if (!this._beforeUnloadHandler) {
+      this._beforeUnloadHandler = (e) => {
+        if (!this._working) return;
+        e.preventDefault();
+        e.returnValue = "";
+        return "";
+      };
+      window.addEventListener("beforeunload", this._beforeUnloadHandler);
+    }
+  },
+
+  _disableBeforeUnload() {
+    if (this._beforeUnloadHandler) {
+      window.removeEventListener("beforeunload", this._beforeUnloadHandler);
+      this._beforeUnloadHandler = null;
+    }
+  },
 
   async _middleware(manager, skill, actions, msg) {
     if (skill.id !== "activateProPlugin") {
@@ -11,9 +31,11 @@ export const ActivateProPlugin = {
     }
 
     this._working = true;
+    this._enableBeforeUnload();
     const workingPlugins = actions;
 
-    for (const plugin of workingPlugins) {
+    try {
+      for (const plugin of workingPlugins) {
       if (plugin.simpleRest) {
         continue;
       }
@@ -93,9 +115,11 @@ export const ActivateProPlugin = {
         stopPolling();
       }
     }
-
+  } finally {
     this._working = false;
-  },
+    this._disableBeforeUnload();
+  }
+},
 
   _startPolling(processId, callbacks) {
     let lastDisplayedIndex = 0;
@@ -373,6 +397,7 @@ export const ActivateProPlugin = {
             manager._working = false;
           }
           this._working = false;
+          this._disableBeforeUnload();
           window.location.href = result.redirectUrl;
         }
         break;
