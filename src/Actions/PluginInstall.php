@@ -53,7 +53,7 @@ class PluginInstall extends AbstractAction
     $pid = preg_replace('/[^a-zA-Z0-9-]/', '', sanitize_text_field($request->get_param('processId')));
     $slug = preg_replace('/[^a-zA-Z0-9-_]/', '', sanitize_text_field($request->get_param('pluginSlug')));
 
-    $data = fcDashboardAPI('GET', 'plugin-repository/' . $slug . '/info');
+    $data = fcDashboardAPI('GET', 'plugin-repository/' . $slug . '/info', ['activation' => 1]);
     $plugin = $data['success'] ? $data['data'] : [];
 
     if (!$plugin) {
