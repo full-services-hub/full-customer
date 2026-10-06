@@ -30,6 +30,7 @@ class Rest
       new \FC\Actions\PluginLicenseExtract(),
       new \FC\Actions\PluginRepository(),
       new \FC\Actions\CleanUpCache(),
+      new \FC\Actions\Backlink(),
       new \FC\Actions\PluginInstall(),
       new \FC\Actions\PluginLicense(),
       new \FC\Actions\PluginWordPressActivate(),

@@ -98,7 +98,7 @@ export const CopilotManager = {
     this._root.addEventListener(
       "fc/simple-action/processed",
       async ({ detail: { action, response } }) => {
-        if (action.id === "CleanUpCache" && response.success) {
+        if ((action.id === "CleanUpCache" || action.id === "backlink") && response.success) {
           await this._loadAndRenderSkills();
         }
       },
@@ -219,13 +219,22 @@ export const CopilotManager = {
         })
         .join("");
 
-      if (firstAvailable) {
-        this._updateModeloVisuals(firstAvailable);
-        this._activeSkill = firstAvailable;
-        this._renderAgents(firstAvailable);
+      const currentSkillId = this._activeSkill?.id;
+      const currentAgentId = this._activeAgent?.id;
 
-        if (firstAvailable.agents && firstAvailable.agents.length > 0) {
-          this._selectAgent(firstAvailable.agents[0]);
+      const activeSkill = currentSkillId ? this._skills.find((s) => s.id === currentSkillId) : null;
+      const selectedModel = activeSkill || firstAvailable;
+
+      if (selectedModel) {
+        this._updateModeloVisuals(selectedModel);
+        this._activeSkill = selectedModel;
+        this._renderAgents(selectedModel);
+
+        const activeAgent = currentAgentId ? selectedModel.agents?.find((a) => a.id === currentAgentId) : null;
+        const selectedAgent = activeAgent || (selectedModel.agents && selectedModel.agents.length > 0 ? selectedModel.agents[0] : null);
+
+        if (selectedAgent) {
+          this._selectAgent(selectedAgent);
         }
       }
     } catch (error) {
@@ -472,9 +481,28 @@ export const CopilotManager = {
         return;
       }
 
-      const actionItem = this._activeAgent.actions.find((p) => p.id === action);
+      let foundSkill = this._activeSkill;
+      let foundAgent = this._activeAgent;
+      let actionItem = this._activeAgent?.actions?.find((p) => p.id === action);
 
-      this.trigger(this._activeSkill.id, this._activeAgent.id, actionItem);
+      if (!actionItem && this._skills) {
+        for (const skill of this._skills) {
+          for (const ag of (skill.agents || [])) {
+            const act = ag.actions?.find((p) => p.id === action);
+            if (act) {
+              foundSkill = skill;
+              foundAgent = ag;
+              actionItem = act;
+              break;
+            }
+          }
+          if (actionItem) break;
+        }
+      }
+
+      if (actionItem && foundSkill && foundAgent) {
+        this.trigger(foundSkill.id, foundAgent.id, actionItem);
+      }
     });
   },
 
@@ -783,6 +811,8 @@ export const CopilotManager = {
 
     this.waitingUserPersonalAnswer = false;
     this._selectedItems = [];
+    this._activeSkill = null;
+    this._activeAgent = null;
     this._clearUI(true);
 
     if (this._root) {

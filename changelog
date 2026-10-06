@@ -25,3 +25,7 @@
 - adicionado wp_rest_url na signature enviada para o painel
 - removido wp_login_url da signature
 - ativação do FULL.Templates pelo LocalLicenseProcessor
+4.1.7
+- adicionado _beforeUnloadHandler para alerta antes do usuário fechar a página de ativação
+- adicionado parametro explicito de ativação no endpoint de info
+- adicionado nova ação no agente dev - backlink

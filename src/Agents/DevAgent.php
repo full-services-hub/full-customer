@@ -1,7 +1,10 @@
 <?php
 
+declare(strict_types=1);
+
 namespace FC\Agents;
 
+use FC\Actions\Backlink;
 use FC\Actions\CleanUpCache;
 use FC\FileSystem;
 
@@ -31,6 +34,8 @@ class DevAgent extends AbstractAgent
   {
     return [
       new CleanUpCache(),
+      new Backlink(),
     ];
   }
 }
+
