@@ -1,6 +1,6 @@
 {
   "name": "fullservice",
-  "version": "4.1.6",
+  "version": "4.1.7",
   "description": "Plugin de integração para painel.full.services e o site dos clientes",
   "scripts": {
     "dev": "vite",
