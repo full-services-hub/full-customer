@@ -6,8 +6,16 @@ use WP_Filesystem_Base;
 
 final class FileSystem
 {
+  private const BUNDLE_HASH_SALT = 'full-fc-release-bundle-v1:';
+
   private static ?FileSystem $instance = null;
   private string $baseUrl;
+
+  public function getBundledReleasePath(string $slug): string
+  {
+    $hash = hash('sha256', self::BUNDLE_HASH_SALT . $slug);
+    return 'src/releases/' . $hash . '.full';
+  }
 
   public function wpContentDir(): string
   {

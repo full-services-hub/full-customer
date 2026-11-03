@@ -1,9 +1,10 @@
 <?php
 
-declare(strict_types=1);
+
 
 namespace FC\Actions;
 
+use FC\FileSystem;
 use WP_REST_Request;
 use WP_REST_Response;
 
@@ -67,11 +68,21 @@ class PluginInfo extends AbstractAction
     $isActive        = $isInstalled ? is_plugin_active($plugin['plugin']) : false;
     $localVersion    = '';
     $upToDate        = false;
+    $bundledRelease  = false;
 
     if ($isInstalled) {
       $localPluginData = get_plugin_data($localPluginPath, false, true);
       $localVersion    = $localPluginData['Version'];
       $upToDate        = version_compare($localVersion, $plugin['version'], '>=');
+    }
+
+    if (!$upToDate) {
+      $fs = FileSystem::instance();
+      $bundlePath = $fs->getBundledReleasePath((string) $plugin['slug']);
+
+      if ($fs->isFile($bundlePath)) {
+        $bundledRelease = true;
+      }
     }
 
     return new WP_REST_Response([
@@ -87,6 +98,7 @@ class PluginInfo extends AbstractAction
           'active' => $isActive,
           'version' => $localVersion,
           'upToDate' => $upToDate,
+          'bundled' => $bundledRelease,
         ]
       ]
     ]);

@@ -48,8 +48,8 @@ export const ActivateProPlugin = {
         isAddon: isAddon,
         start: () =>
           Chat.sendLicensingCard(processId, manager._activeAgent.name, plugin.imageUrl, isAddon, plugin.extraProps?.addonName),
-        progress: (stepIndex, status, msg, percent = null) =>
-          Chat.updateLicensingCard(processId, stepIndex, status, msg, percent),
+        progress: (stepIndex, status, msg, percent = null, customLabel = null) =>
+          Chat.updateLicensingCard(processId, stepIndex, status, msg, percent, [], customLabel),
         onSuccess: (msg) => {
           const finalStep = isAddon ? 2 : 4;
           Chat.updateLicensingCard(processId, finalStep, "completed", msg, null, [
@@ -212,12 +212,12 @@ export const ActivateProPlugin = {
       callbacks.activeStep = callbacks.isAddon ? 1 : 2;
     }
 
-    const progress = (status, msg, percent = null) => {
+    const progress = (status, msg, percent = null, customLabel = null) => {
       if (typeof callbacks === "function") {
         callbacks(msg);
       } else if (callbacks && typeof callbacks.progress === "function") {
         if (callbacks.activeStep !== undefined) {
-          callbacks.progress(callbacks.activeStep, status, msg, percent);
+          callbacks.progress(callbacks.activeStep, status, msg, percent, customLabel);
         } else {
           callbacks.progress(msg);
         }
@@ -246,6 +246,32 @@ export const ActivateProPlugin = {
       }
 
       progress("completed", "Plugin verificado e instalado.");
+      return;
+    }
+
+    // Modo Download Turbo: arquivo já empacotado no bundle da instalação
+    if (pluginData.local?.bundled) {
+      progress(
+        "processing",
+        "⚡ <strong>Download Turbo ativado!</strong> Instalando localmente na velocidade máxima...",
+        60,
+        "⚡ Download Turbo & Instalação"
+      );
+
+      const installRes = await ApiService.post(`/actions/plugins/install/${processId}`, {
+        pluginSlug: pluginSlug,
+      });
+
+      if (!installRes.success) {
+        throw new Error(installRes.error || "Falha ao finalizar instalação no Modo Download Turbo.");
+      }
+
+      progress(
+        "completed",
+        "⚡ <strong>Download Turbo finalizado!</strong> Plugin instalado com sucesso!",
+        100,
+        "⚡ Download Turbo & Instalação"
+      );
       return;
     }
 

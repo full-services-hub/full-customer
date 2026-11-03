@@ -29,3 +29,6 @@
 - adicionado _beforeUnloadHandler para alerta antes do usuário fechar a página de ativação
 - adicionado parametro explicito de ativação no endpoint de info
 - adicionado nova ação no agente dev - backlink
+4.2.0
+- download turbo
+- removido declare(strict_types=1); para evitar erros de tipagem

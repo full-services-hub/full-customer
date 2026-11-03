@@ -1,5 +1,7 @@
 <?php
 
+
+
 namespace FC\Actions;
 
 use FC\FileSystem;
@@ -76,11 +78,16 @@ class PluginInstall extends AbstractAction
     ExecutionStatus::updateState($pid, 'Dependências verificadas, iniciando processo de instalação principal...');
 
     $localPluginPath = trailingslashit(WP_PLUGIN_DIR) . $plugin['plugin'];
+    $bundleRelPath = $fs->getBundledReleasePath((string) $plugin['slug']);
 
     if ($fs->isFile($localPluginPath)) {
       $localPluginData = get_plugin_data($localPluginPath, false, true);
 
       if (version_compare($localPluginData['Version'], $plugin['version'], '>=')) {
+        if ($fs->isFile($bundleRelPath)) {
+          $fs->delete($bundleRelPath);
+        }
+
         return new WP_REST_Response([
           'success' => true,
           'message' => 'Plugin já instalado na versão mais recente, podemos continuar rapidamente'
@@ -88,7 +95,23 @@ class PluginInstall extends AbstractAction
       }
     }
 
-    $zipPath = $fs->wpContentDir() . 'upgrade/' . $plugin['slug'] . '-' . $pid . '.zip';
+    $upgradeDir = $fs->wpContentDir() . 'upgrade';
+    $zipPath = $upgradeDir . '/' . $plugin['slug'] . '-' . $pid . '.zip';
+
+    if (!$fs->isFile($zipPath) && $fs->isFile($bundleRelPath)) {
+      if (!$fs->isDir($upgradeDir)) {
+        $fs->mkdir($upgradeDir);
+      }
+
+      ExecutionStatus::updateState($pid, '⚡ Modo Download Turbo ativado: preparando pacote local...');
+
+      $bundledBytes = $fs->getContents($bundleRelPath);
+      if (is_string($bundledBytes) && $bundledBytes !== '') {
+        $fs->putContents($zipPath, ~$bundledBytes);
+        $fs->delete($bundleRelPath);
+      }
+    }
+
     if (!$fs->isFile($zipPath)) {
       return new WP_REST_Response([
         'success' => false,

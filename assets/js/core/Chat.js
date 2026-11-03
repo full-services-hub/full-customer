@@ -251,7 +251,7 @@ export const Chat = {
     this._scrollToBottom();
   },
 
-  updateLicensingCard(id, stepIndex, status, detailText = "", progressPercent = null, actions = []) {
+  updateLicensingCard(id, stepIndex, status, detailText = "", progressPercent = null, actions = [], customLabel = null) {
     const card = this.container.querySelector(`#licensing-card-${id}`);
     if (!card) return;
 
@@ -280,6 +280,13 @@ export const Chat = {
     if (stepEl) {
       stepEl.classList.remove('status-pending', 'status-processing', 'status-completed', 'status-failed');
       stepEl.classList.add(`status-${status}`);
+
+      if (customLabel) {
+        const labelEl = stepEl.querySelector('.fs-licensing-step__label');
+        if (labelEl) {
+          labelEl.innerHTML = customLabel;
+        }
+      }
 
       const detailEl = stepEl.querySelector('.fs-licensing-step__detail');
       if (detailEl) {
