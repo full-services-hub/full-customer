@@ -1,34 +1,50 @@
-4.1.1
-- melhorada a ux de conexão de conta
-- em ações que não requerem resposta, alterado placeholder
-- arrumado tutorial para nova ux de conexão
-- correção do ícone de conexão
-- removido z-index no container quando .chatting para não bloquear sub-menus wp
-- a ação de reativação só aparece quando o plugin tiver uma ativação com status de sucesso
-- remoeada a ação para "Consultar status"
-- nova ação "Download de plugin (zip)"
-- nova ação "Solicitar suporte" - via plugin, conta ou genérico
-4.1.2
-- removido solicitação de suporte
-4.1.3
-- magic link disponível para sites não conectados
-- beacon de versão
-- corrigido erro que impedia telemetria do fc para o painel
-4.1.4
-- beacon reduzido para mínimo necessário
-- ajustado updates para não ter conflito com Updraft Pro
-- enviado admin_url junto na assinatura do fc
-4.1.5
-- corrigido função login_url para wp_login_url
-4.1.6
-- em caso de FULL_CUSTOMER_API_LOGGER, sempre ignorar o cache
-- adicionado wp_rest_url na signature enviada para o painel
-- removido wp_login_url da signature
-- ativação do FULL.Templates pelo LocalLicenseProcessor
-4.1.7
-- adicionado _beforeUnloadHandler para alerta antes do usuário fechar a página de ativação
-- adicionado parametro explicito de ativação no endpoint de info
-- adicionado nova ação no agente dev - backlink
-4.2.0
-- download turbo
-- removido declare(strict_types=1); para evitar erros de tipagem
+# Changelog - FULL.Cliente (full-customer)
+
+## 4.2.0
+- **Download Turbo (`PluginInstall` & `FileSystem`)**: Suporte à descompactação e instalação local instantânea a partir de pacotes pré-empacotados (`.full`) no bundle do plugin, com limpeza automática do artefato após uso.
+- **Ativação Nativa do Elementor PRO no Backend (`LocalLicenseProcessor`)**:
+  - Eliminação do loopback HTTP cURL para o próprio `/wp-admin/` e remoção da dependência de redirecionamento para `wp-login.php?redirect_to` em `finalizeElementorActivation()` (que falhava em sites com login customizado, WPS Hide Login, Cloudflare ou bloqueio de loopback/NAT).
+  - Interceptação direta do código OAuth (`code`) via cabeçalho `Location` (`redirection => 0`) e execução completa da troca de token (`Facade::get('elementor-one')->service()->get_token()`), migração (`Migration::run('elementor-pro', true)`) e sincronização da chave `elementor_pro_license_key` (`Editor::update_editor_data()`) diretamente via PHP.
+  - Limpeza prévia de estados residuais (`resetElementorState`: `elementor_one_migrated_plugins`, `elementor_pro_license_key` e caches de licença v2) antes de iniciar nova conexão OAuth, evitando abortos silenciosos em reativações.
+  - Garantia de contexto de usuário administrador (`ensureAdminUserContext`), habilitando o funcionamento completo também em execuções via WP-Cron (`RemoteActivation`).
+  - Correção na leitura de atributos (`path` e `domain` via `$cookie->attributes`) e deduplicação de cookies por nome em `mergeResponseCookies()` durante o fluxo OAuth no `my.elementor.com`.
+- **Otimização de Performance no Licenciamento (`PluginLicense` & `PluginReactivate`)**:
+  - Cache local temporário (transient) do payload da licença durante as sub-etapas (`fetch_consent`, `submit_consent`, `finalize`, `check_otp`), reduzindo em até 4x as requisições `POST /license` ao Painel e evitando invalidações repetidas do cache local do repositório a cada sub-etapa.
+  - Atualização em tempo real do `ExecutionStatus` com as mensagens de progresso das sub-etapas de licenciamento.
+- **Auto-Upgrade de Dependência Legada (`PluginInstall`)**:
+  - Verificação automática da presença do pacote `ElementorOne` (`Connect/Facade.php`) quando o Elementor Free já estiver instalado no site, realizando upgrade automático via `Plugin_Upgrader` caso a versão instalada seja antiga/incompatível.
+- **Resiliência na Assinatura de Conexão (`Connection`)**:
+  - Fallback automático para `fcGetAnonymousUserConnection()` no `getConnectionToken()` quando o administrador logado no momento for diferente do administrador que realizou a conexão original do site (ou em execuções de background).
+- **Compatibilidade PHP 7.4**:
+  - Removido `declare(strict_types=1);` nos arquivos do cliente para evitar erros fatais de coerção de tipos em ambientes legados (PHP 7.4+).
+
+## 4.1.7
+- **Prevenção de Fechamento Acidental (`_beforeUnloadHandler`)**: Adicionado alerta de confirmação no navegador antes do usuário fechar ou recarregar a página durante uma ativação em andamento.
+- **Rastreio de Instalação (`PluginInfo` / `PluginInstall`)**: Adicionado parâmetro explícito `activation=1` na consulta ao endpoint `/info` para contabilização precisa no funil do Painel.
+- **Agente Dev**: Adicionada nova ação de *backlink*.
+
+## 4.1.6
+- **Modo Debug da API (`DashboardAPI`)**: Quando a constante `FULL_CUSTOMER_API_LOGGER` estiver ativa, o cache de requisições é sempre ignorado.
+- **Assinatura de Conexão (`Connection`)**: Adicionado `wp_rest_url` e removido `wp_login_url` nos metadados enviados via `X-Full-Signature` ao Painel.
+- **FULL.Templates (`LocalLicenseProcessor`)**: Adicionado suporte ao licenciamento do plugin `full-templates`.
+
+## 4.1.5
+- **Correção de Helper WordPress**: Substituída chamada incorreta de `login_url()` pela função nativa `wp_login_url()`.
+
+## 4.1.4
+- **Otimização de Telemetria (Beacon)**: Payload do beacon reduzido ao mínimo necessário para menor sobrecarga.
+- **Compatibilidade de Updates**: Ajustado fluxo de verificação de atualizações para evitar conflitos com o *UpdraftPlus Pro*.
+- **Assinatura de Conexão**: Inclusão do `wp_admin_url` no token de identificação enviado ao Painel.
+
+## 4.1.3
+- **Acesso Rápido (Magic Link)**: Disponibilizado suporte a *magic link* também para sites ainda não conectados.
+- **Telemetria de Versão**: Implementado beacon de versão e corrigida falha que impedia o envio de telemetria do plugin para o Painel.
+
+## 4.1.2
+- **Simplificação de Interface**: Removida a ação direta de solicitação de suporte do menu de ações.
+
+## 4.1.1
+- **Experiência de Conexão (UX)**: Reformulada a interface de conexão de conta, atualizado o tutorial interativo e corrigido o ícone de status de conexão.
+- **Ajustes Visuais no Chat**: Alterado o *placeholder* em ações que não exigem resposta de texto e removido o `z-index` elevado no container `.chatting` para não sobrepor submenus do WordPress.
+- **Regras de Exibição de Ações**: A ação "Solicitar reativação" passa a ser exibida apenas quando o plugin já possuir registro de ativação concluído com sucesso; ação renomeada para "Consultar status".
+- **Novas Ações**: Adicionadas as ações "Download de plugin (zip)" e "Solicitar suporte".

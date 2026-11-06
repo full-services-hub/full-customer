@@ -1,7 +1,5 @@
 <?php
 
-
-
 namespace FC\Actions;
 
 use FC\FileSystem;
@@ -52,8 +50,8 @@ class PluginInstall extends AbstractAction
 
     $fs = FileSystem::instance();
 
-    $pid = preg_replace('/[^a-zA-Z0-9-]/', '', sanitize_text_field($request->get_param('processId')));
-    $slug = preg_replace('/[^a-zA-Z0-9-_]/', '', sanitize_text_field($request->get_param('pluginSlug')));
+    $pid = preg_replace('/[^a-zA-Z0-9-]/', '', sanitize_text_field((string) ($request->get_param('processId') ?? '')));
+    $slug = preg_replace('/[^a-zA-Z0-9-_]/', '', sanitize_text_field((string) ($request->get_param('pluginSlug') ?? '')));
 
     $data = fcDashboardAPI('GET', 'plugin-repository/' . $slug . '/info', ['activation' => 1]);
     $plugin = $data['success'] ? $data['data'] : [];
@@ -81,13 +79,13 @@ class PluginInstall extends AbstractAction
     $bundleRelPath = $fs->getBundledReleasePath((string) $plugin['slug']);
 
     if ($fs->isFile($localPluginPath)) {
+      if ($fs->isFile($bundleRelPath)) {
+        $fs->delete($bundleRelPath);
+      }
+
       $localPluginData = get_plugin_data($localPluginPath, false, true);
 
       if (version_compare($localPluginData['Version'], $plugin['version'], '>=')) {
-        if ($fs->isFile($bundleRelPath)) {
-          $fs->delete($bundleRelPath);
-        }
-
         return new WP_REST_Response([
           'success' => true,
           'message' => 'Plugin já instalado na versão mais recente, podemos continuar rapidamente'
@@ -174,6 +172,21 @@ class PluginInstall extends AbstractAction
           $dependency_file = $file;
           break;
         }
+      }
+
+      if (
+        $dep === 'elementor'
+        && !empty($dependency_file)
+        && !file_exists(WP_PLUGIN_DIR . '/elementor/vendor/elementor/wp-one-package/src/Connect/Facade.php')
+      ) {
+        ExecutionStatus::updateState($pid, 'Atualizando dependência ' . $dep . ' para versão compatível...');
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+        require_once ABSPATH . 'wp-admin/includes/plugin-install.php';
+
+        wp_update_plugins();
+        $upgrader = new \Plugin_Upgrader(new \Automatic_Upgrader_Skin());
+        $upgrader->upgrade($dependency_file);
+        wp_clean_plugins_cache();
       }
 
       if (!empty($dependency_file) && is_plugin_active($dependency_file)) {

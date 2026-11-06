@@ -92,12 +92,23 @@ class Connection
     global $wp_rewrite;
     $restUrl = !empty($wp_rewrite) ? rest_url() : get_home_url(null, 'wp-json');
 
+    $connectionEmail = is_user_logged_in() ? $user->getConnectionEmail() : null;
+    if (empty($connectionEmail) && is_array($anon) && !empty($anon['connection_email'])) {
+      $connectionEmail = (string) $anon['connection_email'];
+    }
+
+    $wpUserEmail = is_user_logged_in() && !empty($user->wp()->user_email) ? $user->wp()->user_email : null;
+    if (empty($wpUserEmail) && is_array($anon) && !empty($anon['user_id'])) {
+      $anonUser = get_userdata((int) $anon['user_id']);
+      $wpUserEmail = $anonUser instanceof \WP_User ? $anonUser->user_email : null;
+    }
+
     $params = [
       'fc_version' => FULL_CUSTOMER_VERSION,
       'fc_mode' => FULL_CUSTOMER_DEV ? 'dev' : 'prod',
       'wp_version' => get_bloginfo('version'),
-      'connection_email' => is_user_logged_in() ? $user->getConnectionEmail() : ($anon ? $anon['connection_email'] : null),
-      'wp_user_email' => is_user_logged_in() ? $user->wp()->user_email : ($anon ? get_userdata($anon['user_id'])->user_email : null),
+      'connection_email' => $connectionEmail,
+      'wp_user_email' => $wpUserEmail,
       'wp_site_url' => trailingslashit(home_url()),
       'wp_admin_url' => trailingslashit(admin_url()),
       'wp_rest_url' => trailingslashit($restUrl),

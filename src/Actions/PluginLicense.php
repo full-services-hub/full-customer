@@ -40,29 +40,51 @@ class PluginLicense extends AbstractAction
 
   public function restHandler(WP_REST_Request $request): WP_REST_Response
   {
-    $slug  = sanitize_text_field($request->get_param('pluginSlug'));
-    $step  = sanitize_text_field($request->get_param('step') ?? '');
-    $state = $request->get_param('state') ?? [];
+    $pid = preg_replace('/[^a-zA-Z0-9-]/', '', sanitize_text_field((string) ($request->get_param('processId') ?? '')));
+    $slug = sanitize_text_field((string) ($request->get_param('pluginSlug') ?? ''));
+    $step = sanitize_text_field((string) ($request->get_param('step') ?? ''));
+    $rawState = $request->get_param('state');
+    $state = is_array($rawState) ? $rawState : [];
 
-    $data = fcDashboardAPI('POST', 'plugin-repository/' . $slug . '/license');
+    $cacheKey = 'fc/license-payload/' . $slug . ($pid !== '' ? '/' . $pid : '');
+    $licensePayload = false;
 
-    if (!$data['success']) {
-      return new WP_REST_Response([
-        'success' => false,
-        'error' => $data['message']
-      ]);
+    if ($step !== '') {
+      $licensePayload = get_transient($cacheKey);
+    }
+
+    if ($licensePayload === false) {
+      $data = fcDashboardAPI('POST', 'plugin-repository/' . $slug . '/license');
+
+      if (!$data['success']) {
+        delete_transient($cacheKey);
+        return new WP_REST_Response([
+          'success' => false,
+          'error' => $data['message']
+        ]);
+      }
+
+      $licensePayload = (string) ($data['data']['license'] ?? '');
+      set_transient($cacheKey, $licensePayload, 5 * MINUTE_IN_SECONDS);
     }
 
     $processor = new LocalLicenseProcessor();
-    $result    = $processor->process($slug, $data['data']['license'] ?? '', $step, $state);
+    $result = $processor->process($slug, (string) $licensePayload, $step, $state);
 
     $isCompleted = !isset($result['completed']) || $result['completed'] === true;
 
-    if ($result['success'] && $isCompleted) {
-      fcDashboardAPI('POST', 'plugin-repository/' . $slug . '/license/confirm');
+    if ($pid !== '' && !empty($result['message'])) {
+      ExecutionStatus::updateState($pid, (string) $result['message']);
     }
 
-    do_action('fc/updates/invalidate');
+    if (!$result['success'] || $isCompleted) {
+      delete_transient($cacheKey);
+    }
+
+    if ($result['success'] && $isCompleted) {
+      fcDashboardAPI('POST', 'plugin-repository/' . $slug . '/license/confirm');
+      do_action('fc/updates/invalidate');
+    }
 
     return new WP_REST_Response([
       'success' => $result['success'],

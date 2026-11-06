@@ -1,11 +1,8 @@
 <?php
 
-
-
 namespace FC\Actions;
 
 use FC\Services\LocalLicenseProcessor;
-use FC\User;
 use WP_REST_Request;
 use WP_REST_Response;
 
@@ -68,48 +65,66 @@ class PluginReactivate extends AbstractAction
 
   public function restHandler(WP_REST_Request $request): WP_REST_Response
   {
-    $slug = $this->repoPlugin && isset($this->repoPlugin['slug']) ? $this->repoPlugin['slug'] : $request->get_param('pluginSlug');
+    $slug = $this->repoPlugin && isset($this->repoPlugin['slug'])
+      ? (string) $this->repoPlugin['slug']
+      : sanitize_text_field((string) ($request->get_param('pluginSlug') ?? ''));
 
-    if (!$slug) {
+    if ($slug === '') {
       return new WP_REST_Response([
         'success' => false,
         'error' => 'Identificador do plugin não fornecido.'
       ], 400);
     }
 
-    $step = sanitize_text_field($request->get_param('step') ?? '');
-    $state = $request->get_param('state') ?? [];
+    $step = sanitize_text_field((string) ($request->get_param('step') ?? ''));
+    $rawState = $request->get_param('state');
+    $state = is_array($rawState) ? $rawState : [];
 
-    if (empty($step)) {
+    $cacheKey = 'fc/license-payload/reactivate/' . $slug;
+    $licensePayload = false;
+
+    if ($step === '') {
       $data = fcDashboardAPI('POST', 'plugin-repository/' . $slug . '/reactivate');
 
       if (!$data['success']) {
+        delete_transient($cacheKey);
         return new WP_REST_Response([
           'success' => false,
           'error' => $data['message']
         ]);
       }
+    } else {
+      $licensePayload = get_transient($cacheKey);
     }
 
-    $licenseData = fcDashboardAPI('POST', 'plugin-repository/' . $slug . '/license');
+    if ($licensePayload === false) {
+      $licenseData = fcDashboardAPI('POST', 'plugin-repository/' . $slug . '/license');
 
-    if (!$licenseData['success']) {
-      return new WP_REST_Response([
-        'success' => false,
-        'error' => $licenseData['message'] ?? 'Não foi possível recuperar os dados da licença no painel da FULL.'
-      ]);
+      if (!$licenseData['success']) {
+        delete_transient($cacheKey);
+        return new WP_REST_Response([
+          'success' => false,
+          'error' => $licenseData['message'] ?? 'Não foi possível recuperar os dados da licença no painel da FULL.'
+        ]);
+      }
+
+      $licensePayload = (string) ($licenseData['data']['license'] ?? '');
+      set_transient($cacheKey, $licensePayload, 5 * MINUTE_IN_SECONDS);
     }
 
     $processor = new LocalLicenseProcessor();
-    $result = $processor->process($slug, $licenseData['data']['license'] ?? '', $step, $state);
+    $result = $processor->process($slug, (string) $licensePayload, $step, $state);
 
     $isCompleted = !isset($result['completed']) || $result['completed'] === true;
 
-    if ($result['success'] && $isCompleted) {
-      fcDashboardAPI('POST', 'plugin-repository/' . $slug . '/license/confirm');
+    if (!$result['success'] || $isCompleted) {
+      delete_transient($cacheKey);
     }
 
-    do_action('fc/updates/invalidate');
+    if ($result['success'] && $isCompleted) {
+      fcDashboardAPI('POST', 'plugin-repository/' . $slug . '/license/confirm');
+      do_action('fc/updates/invalidate');
+    }
 
     return new WP_REST_Response([
       'success' => $result['success'],
