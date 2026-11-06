@@ -55,11 +55,33 @@ class LocalLicenseProcessor
     ];
   }
 
+  private function logDev(string $message, $context = null): void
+  {
+    if (!defined('FULL_CUSTOMER_DEV') || !FULL_CUSTOMER_DEV) {
+      return;
+    }
+
+    $logMessage = '[FC-DEV][ElementorPro] ' . $message;
+    if ($context !== null) {
+      $formattedContext = is_scalar($context) ? (string) $context : wp_json_encode($context);
+      $logMessage .= ' | Data: ' . $formattedContext;
+    }
+
+    error_log($logMessage);
+  }
+
   public function elementorPro(string $license, string $step = '', array $state = []): array
   {
     @set_time_limit(120);
 
+    $this->logDev('Iniciando processamento elementorPro', [
+      'step' => $step !== '' ? $step : '(initial)',
+      'stateKeys' => array_keys($state),
+      'hasLicense' => !empty($license),
+    ]);
+
     if (strpos($license, ':') === false) {
+      $this->logDev('Falha: formato de licença inválido (delimitador : ausente)');
       return [
         'success' => false,
         'trace' => 'invalid_license_payload',
@@ -71,20 +93,33 @@ class LocalLicenseProcessor
     $elementorCookies = is_string($decodedCookies) ? json_decode($decodedCookies, true) : null;
 
     if (empty($licenseKey) || !is_array($elementorCookies)) {
+      $this->logDev('Falha: licenseKey vazia ou cookies decodificados inválidos', [
+        'hasLicenseKey' => !empty($licenseKey),
+        'isCookiesArray' => is_array($elementorCookies),
+      ]);
       return [
         'success' => false,
         'trace' => 'invalid_license_cookies',
       ];
     }
 
+    $this->logDev('Payload de licença validado com sucesso', [
+      'licenseKey' => $licenseKey,
+      'cookiesCount' => count($elementorCookies),
+    ]);
+
     if (empty($step)) {
+      $this->logDev('Step 1 (inicial): Solicitando getElementorOAuthUrl');
       $oauthUrl = $this->getElementorOAuthUrl();
       if (!$oauthUrl) {
+        $this->logDev('Falha: getElementorOAuthUrl retornou null');
         return [
           'success' => false,
           'trace' => 'local_authorize_internal_error',
         ];
       }
+
+      $this->logDev('Step 1 concluído com sucesso. URL OAuth obtida', ['oauthUrl' => $oauthUrl]);
 
       return [
         'success' => true,
@@ -99,6 +134,7 @@ class LocalLicenseProcessor
 
     if ($step === 'fetch_consent') {
       $oauthUrl = isset($state['oauthUrl']) ? (string) $state['oauthUrl'] : '';
+      $this->logDev('Step 2 (fetch_consent): Buscando consent challenge no Elementor', ['oauthUrl' => $oauthUrl]);
       return $this->fetchElementorConsentUrl($oauthUrl, $elementorCookies);
     }
 
@@ -106,14 +142,25 @@ class LocalLicenseProcessor
       $consentUrl = isset($state['consentUrl']) ? (string) $state['consentUrl'] : '';
       $challenge = isset($state['challenge']) ? (string) $state['challenge'] : '';
       $savedCookies = isset($state['cookies']) && is_array($state['cookies']) ? $state['cookies'] : [];
+      $this->logDev('Step 3 (submit_consent): Enviando consentimento para API do Elementor', [
+        'consentUrl' => $consentUrl,
+        'challenge' => $challenge,
+        'cookiesCount' => count($savedCookies),
+      ]);
       return $this->submitElementorConsent($consentUrl, $challenge, $licenseKey, $savedCookies);
     }
 
     if ($step === 'finalize') {
       $redirectUrl = isset($state['redirectUrl']) ? (string) $state['redirectUrl'] : '';
       $savedCookies = isset($state['cookies']) && is_array($state['cookies']) ? $state['cookies'] : [];
+      $this->logDev('Step 4 (finalize): Finalizando callback OAuth e ativação local', [
+        'redirectUrl' => $redirectUrl,
+        'cookiesCount' => count($savedCookies),
+      ]);
       return $this->finalizeElementorActivation($redirectUrl, $savedCookies);
     }
+
+    $this->logDev('Falha: step desconhecido recebido', ['step' => $step]);
 
     return [
       'success' => false,
@@ -169,6 +216,11 @@ class LocalLicenseProcessor
   private function resetElementorState(): void
   {
     $migrated = get_option('elementor_one_migrated_plugins', []);
+    $this->logDev('Executando resetElementorState', [
+      'migratedPluginsBefore' => $migrated,
+      'hasLicenseKey' => (bool) get_option('elementor_pro_license_key'),
+    ]);
+
     if (is_array($migrated) && !empty($migrated)) {
       $migrated = array_values(array_diff($migrated, ['elementor-pro']));
       update_option('elementor_one_migrated_plugins', $migrated, false);
@@ -180,37 +232,66 @@ class LocalLicenseProcessor
     delete_option('_elementor_pro_license_v2_data');
     delete_option('_elementor_pro_license_v2_data_fallback');
     delete_option('_elementor_pro_api_requests_lock');
+
+    $this->logDev('resetElementorState finalizado');
   }
 
   private function getElementorOAuthUrl(): ?string
   {
     $this->ensureAdminUserContext();
+    $this->logDev('Contexto admin garantido para getElementorOAuthUrl', [
+      'currentUserId' => get_current_user_id(),
+    ]);
+
     $this->resetElementorState();
 
+    $this->logDev('Disparando requisição REST interna /elementor-one/v1/connect/authorize');
     $restRequest = new \WP_REST_Request('POST', '/elementor-one/v1/connect/authorize');
     $restRequest->set_param('clearSession', true);
 
     $response = rest_do_request($restRequest);
     if (!$response->is_error()) {
       $responseData = $response->get_data();
+      $this->logDev('Resposta recebida de /elementor-one/v1/connect/authorize', [
+        'is_error' => false,
+        'status' => $response->get_status(),
+        'hasData' => is_array($responseData) && !empty($responseData['data']),
+      ]);
       if (is_array($responseData) && !empty($responseData['data']) && is_string($responseData['data'])) {
         return $responseData['data'];
       }
+    } else {
+      $this->logDev('Erro ao executar REST /elementor-one/v1/connect/authorize', [
+        'status' => $response->get_status(),
+        'data' => $response->get_data(),
+      ]);
     }
 
+    $this->logDev('Tentando fallback via Facade direto: ElementorOne\Connect\Facade');
     if (class_exists('\ElementorOne\Connect\Facade')) {
       try {
         $facade = \ElementorOne\Connect\Facade::get('elementor-one');
         if ($facade) {
           $facade->data()->clear_session(true);
           $clientId = $facade->service()->register_client();
+          $this->logDev('Cliente registrado via Facade', ['clientId' => $clientId]);
           if (!empty($clientId)) {
-            return $facade->utils()->get_authorize_url($clientId);
+            $authorizeUrl = $facade->utils()->get_authorize_url($clientId);
+            $this->logDev('URL de autorização gerada via Facade', ['authorizeUrl' => $authorizeUrl]);
+            return $authorizeUrl;
           }
+        } else {
+          $this->logDev('Facade::get("elementor-one") retornou null');
         }
       } catch (\Throwable $e) {
+        $this->logDev('Exceção capturada no fallback do Facade', [
+          'error' => $e->getMessage(),
+          'file' => $e->getFile() . ':' . $e->getLine(),
+        ]);
         return null;
       }
+    } else {
+      $this->logDev('Classe ElementorOne\Connect\Facade não existe');
     }
 
     return null;
@@ -291,6 +372,7 @@ class LocalLicenseProcessor
   private function fetchElementorConsentUrl(string $oauthUrl, array $elementorCookies): array
   {
     if ($oauthUrl === '') {
+      $this->logDev('Falha em fetchElementorConsentUrl: oauthUrl vazia');
       return [
         'success' => false,
         'trace' => 'consent_url_empty',
@@ -298,6 +380,10 @@ class LocalLicenseProcessor
     }
 
     $cookies = $this->buildHttpCookies($elementorCookies);
+    $this->logDev('Disparando wp_remote_get em oauthUrl', [
+      'oauthUrl' => $oauthUrl,
+      'cookiesCount' => count($cookies),
+    ]);
 
     $request = wp_remote_get($oauthUrl, [
       'cookies' => $cookies,
@@ -305,13 +391,19 @@ class LocalLicenseProcessor
     ]);
 
     if (is_wp_error($request)) {
+      $this->logDev('Falha no wp_remote_get de oauthUrl', ['error' => $request->get_error_message()]);
       return [
         'success' => false,
         'trace' => 'consent_url_fetch_failed',
       ];
     }
 
+    $responseCode = wp_remote_retrieve_response_code($request);
     $consentUrl = (string) ($request['http_response']->get_response_object()->url ?? '');
+    $this->logDev('Resposta recebida de oauthUrl', [
+      'responseCode' => $responseCode,
+      'consentUrl' => $consentUrl,
+    ]);
 
     $parsed = wp_parse_url($consentUrl);
     $queryParams = [];
@@ -319,6 +411,7 @@ class LocalLicenseProcessor
     $challenge = isset($queryParams['consent_challenge']) ? (string) $queryParams['consent_challenge'] : '';
 
     if ($challenge === '') {
+      $this->logDev('Falha: consent_challenge não encontrado na consentUrl', ['consentUrl' => $consentUrl]);
       return [
         'success' => false,
         'trace' => 'consent_challenge_missing',
@@ -326,6 +419,10 @@ class LocalLicenseProcessor
     }
 
     $allCookies = $this->mergeResponseCookies($elementorCookies, $request);
+    $this->logDev('Consent challenge extraído com sucesso', [
+      'challenge' => $challenge,
+      'totalCookies' => count($allCookies),
+    ]);
 
     return [
       'success' => true,
@@ -343,6 +440,10 @@ class LocalLicenseProcessor
   private function submitElementorConsent(string $consentUrl, string $challenge, string $licenseKey, array $savedCookies): array
   {
     if ($consentUrl === '' || $challenge === '') {
+      $this->logDev('Falha em submitElementorConsent: parâmetros ausentes', [
+        'consentUrl' => $consentUrl,
+        'hasChallenge' => !empty($challenge),
+      ]);
       return [
         'success' => false,
         'trace' => 'consent_params_missing',
@@ -350,6 +451,11 @@ class LocalLicenseProcessor
     }
 
     $cookies = $this->buildHttpCookies($savedCookies);
+    $this->logDev('Enviando POST de consentimento para my.elementor.com/connect/api/v1/consent', [
+      'challenge' => $challenge,
+      'subscriptionId' => $licenseKey,
+      'cookiesCount' => count($cookies),
+    ]);
 
     $response = wp_remote_post('https://my.elementor.com/connect/api/v1/consent', [
       'cookies' => $cookies,
@@ -367,16 +473,26 @@ class LocalLicenseProcessor
     ]);
 
     if (is_wp_error($response)) {
+      $this->logDev('Falha no POST de consentimento', ['error' => $response->get_error_message()]);
       return [
         'success' => false,
         'trace' => 'consent_submit_failed',
       ];
     }
 
-    $respBody = json_decode(wp_remote_retrieve_body($response), true);
+    $responseCode = wp_remote_retrieve_response_code($response);
+    $respRawBody = wp_remote_retrieve_body($response);
+    $respBody = json_decode($respRawBody, true);
     $redirectUrl = is_array($respBody) && !empty($respBody['redirectUrl']) ? (string) $respBody['redirectUrl'] : '';
 
+    $this->logDev('Resposta recebida do POST de consentimento', [
+      'responseCode' => $responseCode,
+      'redirectUrl' => $redirectUrl,
+      'rawBody' => $respRawBody,
+    ]);
+
     if ($redirectUrl === '') {
+      $this->logDev('Falha: redirectUrl não retornada no body de consentimento');
       return [
         'success' => false,
         'trace' => 'subscription_select',
@@ -384,6 +500,10 @@ class LocalLicenseProcessor
     }
 
     $allCookies = $this->mergeResponseCookies($savedCookies, $response);
+    $this->logDev('Consentimento aprovado com sucesso', [
+      'redirectUrl' => $redirectUrl,
+      'totalCookies' => count($allCookies),
+    ]);
 
     return [
       'success' => true,
@@ -400,11 +520,17 @@ class LocalLicenseProcessor
   private function finalizeElementorActivation(string $redirectUrl, array $savedCookies): array
   {
     if ($redirectUrl === '') {
+      $this->logDev('Falha em finalizeElementorActivation: redirectUrl vazia');
       return [
         'success' => false,
         'trace' => 'missing_redirect_url',
       ];
     }
+
+    $this->logDev('Iniciando loop de redirecionamentos em finalizeElementorActivation', [
+      'initialUrl' => $redirectUrl,
+      'cookiesCount' => count($savedCookies),
+    ]);
 
     $currentUrl = $redirectUrl;
     $cookiesData = $savedCookies;
@@ -419,9 +545,15 @@ class LocalLicenseProcessor
         wp_parse_str($parsedCurrent['query'], $currentQuery);
       }
 
+      $this->logDev("Hop #{$hop} analisando URL", [
+        'url' => $currentUrl,
+        'hasCode' => !empty($currentQuery['code']),
+      ]);
+
       if (!empty($currentQuery['code'])) {
         $code = sanitize_text_field((string) $currentQuery['code']);
         $state = isset($currentQuery['state']) ? sanitize_text_field((string) $currentQuery['state']) : '';
+        $this->logDev("Código OAuth encontrado na query do hop #{$hop}", ['code' => $code]);
         break;
       }
 
@@ -433,6 +565,7 @@ class LocalLicenseProcessor
       ]);
 
       if (is_wp_error($response)) {
+        $this->logDev("Erro HTTP no hop #{$hop}", ['error' => $response->get_error_message()]);
         return [
           'success' => false,
           'trace' => 'callback_fetch_error',
@@ -447,7 +580,14 @@ class LocalLicenseProcessor
       }
       $location = is_string($location) ? trim($location) : '';
 
+      $responseCode = wp_remote_retrieve_response_code($response);
+      $this->logDev("Hop #{$hop} resultado HTTP", [
+        'code' => $responseCode,
+        'locationHeader' => $location,
+      ]);
+
       if ($location === '') {
+        $this->logDev("Hop #{$hop} não retornou cabeçalho Location; interrompendo hops");
         break;
       }
 
@@ -464,6 +604,11 @@ class LocalLicenseProcessor
       if (!empty($locationQuery['code'])) {
         $code = sanitize_text_field((string) $locationQuery['code']);
         $state = isset($locationQuery['state']) ? sanitize_text_field((string) $locationQuery['state']) : '';
+        $this->logDev("Código OAuth interceptado no cabeçalho Location", [
+          'code' => $code,
+          'state' => $state,
+          'location' => $location,
+        ]);
         break;
       }
 
@@ -471,16 +616,21 @@ class LocalLicenseProcessor
     }
 
     if ($code === '') {
+      $this->logDev('Falha: código OAuth não foi capturado em nenhum dos hops');
       return [
         'success' => false,
         'trace' => 'oauth_code_missing',
       ];
     }
 
+    $this->logDev('Executando completeElementorConnectLocally com o código OAuth interceptado');
     $activated = $this->completeElementorConnectLocally($code, $state);
     if (!$activated['success']) {
+      $this->logDev('Falha em completeElementorConnectLocally', ['trace' => $activated['trace'] ?? 'unknown']);
       return $activated;
     }
+
+    $this->logDev('Ativação concluída com sucesso total!');
 
     return [
       'success' => true,
@@ -492,9 +642,17 @@ class LocalLicenseProcessor
 
   private function completeElementorConnectLocally(string $code, string $state): array
   {
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
     $this->ensureAdminUserContext();
+    $this->logDev('Iniciando completeElementorConnectLocally', [
+      'code' => $code,
+      'state' => $state,
+      'userId' => get_current_user_id(),
+    ]);
 
     if (!class_exists('\ElementorOne\Connect\Facade')) {
+      $this->logDev('Falha: classe ElementorOne\Connect\Facade não existe');
       return [
         'success' => false,
         'trace' => 'elementor_one_facade_missing',
@@ -504,6 +662,7 @@ class LocalLicenseProcessor
     try {
       $facade = \ElementorOne\Connect\Facade::get('elementor-one');
       if (!$facade) {
+        $this->logDev('Falha: Facade::get("elementor-one") retornou null');
         return [
           'success' => false,
           'trace' => 'elementor_one_instance_missing',
@@ -514,12 +673,22 @@ class LocalLicenseProcessor
         ? \ElementorOne\Connect\Classes\GrantTypes::AUTHORIZATION_CODE
         : 'authorization_code';
 
+      $this->logDev('Solicitando token exchange via Facade->service()->get_token', [
+        'grantType' => $grantType,
+      ]);
+
       $tokenResponse = $facade->service()->get_token($grantType, $code);
       $accessToken = is_array($tokenResponse) && !empty($tokenResponse['access_token'])
         ? (string) $tokenResponse['access_token']
         : '';
 
+      $this->logDev('Resposta recebida do token exchange', [
+        'hasAccessToken' => !empty($accessToken),
+        'tokenKeys' => is_array($tokenResponse) ? array_keys($tokenResponse) : null,
+      ]);
+
       if ($accessToken === '') {
+        $this->logDev('Falha: access_token vazio retornado');
         return [
           'success' => false,
           'trace' => 'oauth_token_exchange_empty',
@@ -527,31 +696,53 @@ class LocalLicenseProcessor
       }
 
       $ownerId = $this->resolveAdminUserId();
+      $this->logDev('Configurando dados no Facade', ['ownerId' => $ownerId]);
 
       $facade->data()->set_share_usage_data('yes');
       $facade->data()->set_owner_user_id($ownerId);
       $facade->data()->set_home_url();
 
-      do_action('elementor_one/connected', $facade);
-      do_action('elementor_one/' . $facade->get_config('app_prefix') . '_connected', $facade);
+      $appPrefix = (string) $facade->get_config('app_prefix');
 
-      if (class_exists('\ElementorOne\Admin\Services\Migration')) {
-        try {
-          \ElementorOne\Admin\Services\Migration::instance()->run('elementor-pro', true);
-        } catch (\Throwable $e) {
+      if (class_exists('\ElementorOne\Admin\Components\Onboarding')) {
+        $onboarding = \ElementorOne\Admin\Components\Onboarding::instance();
+        if ($onboarding) {
+          remove_action('elementor_one/' . $appPrefix . '_connected', [$onboarding, 'on_connect']);
+          remove_action('elementor_one/' . $appPrefix . '_connect_fail', [$onboarding, 'on_connect_fail']);
+          $this->logDev('Hooks de redirect do Onboarding removidos com sucesso');
         }
       }
 
+      $this->logDev('Disparando actions elementor_one/connected');
+      do_action('elementor_one/connected', $facade);
+      do_action('elementor_one/' . $appPrefix . '_connected', $facade);
+
+      if (class_exists('\ElementorOne\Admin\Services\Migration')) {
+        $this->logDev('Disparando Migration::instance()->run("elementor-pro", true)');
+        try {
+          \ElementorOne\Admin\Services\Migration::instance()->run('elementor-pro', true);
+          $this->logDev('Migration executada com sucesso');
+        } catch (\Throwable $e) {
+          $this->logDev('Aviso em Migration::instance()->run', ['error' => $e->getMessage()]);
+        }
+      }
+
+      $this->logDev('Disparando action elementor_one/update_editor_data');
       do_action('elementor_one/update_editor_data');
       remove_all_actions('elementor_one/update_editor_data');
 
       $activeKey = get_option('elementor_pro_license_key', '');
+      $this->logDev('Verificando elementor_pro_license_key após action', ['hasKey' => !empty($activeKey)]);
+
       if (empty($activeKey) && class_exists('\ElementorOne\Admin\Services\Editor')) {
+        $this->logDev('Tentando fallback via Editor::instance()->update_editor_data("activate", true)');
         \ElementorOne\Admin\Services\Editor::instance()->update_editor_data('activate', true);
         $activeKey = get_option('elementor_pro_license_key', '');
+        $this->logDev('Chave após fallback do Editor', ['hasKey' => !empty($activeKey)]);
       }
 
       if (empty($activeKey)) {
+        $this->logDev('Falha: elementor_pro_license_key não foi gravada na tabela wp_options');
         return [
           'success' => false,
           'trace' => 'license_key_not_populated',
@@ -559,13 +750,20 @@ class LocalLicenseProcessor
       }
 
       if (class_exists('\ElementorPro\License\API')) {
+        $this->logDev('Executando ElementorPro\License\API::get_license_data(true)');
         \ElementorPro\License\API::get_license_data(true);
       }
+
+      $this->logDev('completeElementorConnectLocally finalizado com sucesso total');
 
       return [
         'success' => true,
       ];
     } catch (\Throwable $e) {
+      $this->logDev('Exceção capturada em completeElementorConnectLocally', [
+        'error' => $e->getMessage(),
+        'file' => $e->getFile() . ':' . $e->getLine(),
+      ]);
       return [
         'success' => false,
         'trace' => 'oauth_token_exchange_failed',

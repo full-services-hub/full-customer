@@ -3,7 +3,7 @@
   "description": "Plugin de integração para painel.full.services e o site dos clientes",
   "type": "plugin",
   "license": "GPL-3.0-or-later",
-  "version": "4.2.0",
+  "version": "4.2.1",
   "autoload": {
     "psr-4": {
       "FC\\": "src/"
